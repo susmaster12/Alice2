@@ -99,7 +99,7 @@ def handle_dialog(res, req):
                         'hide': True
                     },
                     {
-                        'title': 'Нет',
+                        'title': 'Неет',
                         'hide': True
                     },
                     {
