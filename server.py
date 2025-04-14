@@ -1,32 +1,23 @@
 from flask import Flask, request, jsonify
 import logging
-import json
 import random
 
 app = Flask(__name__)
 
 logging.basicConfig(level=logging.INFO)
 
-# создаем словарь, в котором ключ — название города,
-# а значение — массив, где перечислены id картинок,
-# которые мы записали в прошлом пункте.
-
 cities = {
-    'москва': ['997614/b8ada6e5f431bd0f54f9',
-               '1030494/836f950c73c5d7a72a5a'],
-    'нью-йорк': ['1030494/836f950c73c5d7a72a5a',
-                 '1533899/973a2f40db3ed82f2f31'],
-    'париж': ["997614/b8ada6e5f431bd0f54f9"]
+    'москва': ['997614/e16b09dad519e0322fc3', '14236656/5e5c70a180dc56109ec0'],
+    'нью-йорк': ['1030494/db78a66a2a9c4f6030b2', '1656841/afd59e1a306ffd33c9f6'],
+    'париж': ["14236656/af592714c3deade348bc", '1030494/584baccf19434e9ffa6f']
 }
 
-# создаем словарь, где для каждого пользователя
-# мы будем хранить его имя
 sessionStorage = {}
 
 
 @app.route('/post', methods=['POST'])
 def main():
-    logging.info(f'Request: {request.json!r}')
+    logging.info('Request: %r', request.json)
     response = {
         'session': request.json['session'],
         'version': request.json['version'],
@@ -35,73 +26,187 @@ def main():
         }
     }
     handle_dialog(response, request.json)
-    logging.info(f'Response: {response!r}')
+    logging.info('Response: %r', response)
     return jsonify(response)
 
 
 def handle_dialog(res, req):
     user_id = req['session']['user_id']
-
-    # если пользователь новый, то просим его представиться.
     if req['session']['new']:
-        res['response']['text'] = 'Привет! Назови свое имя!'
-        # создаем словарь в который в будущем положим имя пользователя
+        res['response']['text'] = 'Привет! Назови своё имя!'
         sessionStorage[user_id] = {
-            'first_name': None
+            'first_name': None,  # здесь будет храниться имя
+            'game_started': False  # здесь информация о том, что пользователь начал игру. По умолчанию False
         }
         return
 
-    # если пользователь не новый, то попадаем сюда.
-    # если поле имени пустое, то это говорит о том,
-    # что пользователь еще не представился.
     if sessionStorage[user_id]['first_name'] is None:
-        # в последнем его сообщение ищем имя.
         first_name = get_first_name(req)
-        # если не нашли, то сообщаем пользователю что не расслышали.
         if first_name is None:
-            res['response']['text'] = \
-                'Не расслышала имя. Повтори, пожалуйста!'
-        # если нашли, то приветствуем пользователя.
-        # И спрашиваем какой город он хочет увидеть.
+            res['response']['text'] = 'Не расслышала имя. Повтори, пожалуйста!'
         else:
             sessionStorage[user_id]['first_name'] = first_name
-            res['response'][
-                'text'] = 'Приятно познакомиться, ' \
-                          + first_name.title() \
-                          + '. Я - Алиса. Какой город хочешь увидеть?'
-            # получаем варианты buttons из ключей нашего словаря cities
+            # создаём пустой массив, в который будем записывать города, которые пользователь уже отгадал
+            sessionStorage[user_id]['guessed_cities'] = []
+            # как видно из предыдущего навыка, сюда мы попали, потому что пользователь написал своем имя.
+            # Предлагаем ему сыграть и два варианта ответа "Да" и "Нет".
+            res['response']['text'] = f'Приятно познакомиться, {first_name.title()}. Я Алиса. Отгадаешь город по фото?'
             res['response']['buttons'] = [
                 {
-                    'title': city.title(),
+                    'title': 'Да',
                     'hide': True
-                } for city in cities
+                },
+                {
+                    'title': 'Нет',
+                    'hide': True
+                },
+                {
+                    'title': 'Помощь',
+                    'hide': True
+                }
             ]
-    # если мы знакомы с пользователем и он нам что-то написал,
-    # то это говорит о том, что он уже говорит о городе,
-    # что хочет увидеть.
     else:
-        # ищем город в сообщение от пользователя
-        city = get_city(req)
-        # если этот город среди известных нам,
-        # то показываем его (выбираем одну из двух картинок случайно)
-        if city in cities:
-            res['response']['card'] = {}
-            res['response']['card']['type'] = 'BigImage'
-            res['response']['card']['title'] = 'Этот город я знаю.'
-            res['response']['card']['image_id'] = random.choice(cities[city])
-            res['response']['text'] = 'Я угадал!'
-        # если не нашел, то отвечает пользователю
-        # 'Первый раз слышу об этом городе.'
+        # У нас уже есть имя, и теперь мы ожидаем ответ на предложение сыграть.
+        # В sessionStorage[user_id]['game_started'] хранится True или False в зависимости от того,
+        # начал пользователь игру или нет.
+        if not sessionStorage[user_id]['game_started']:
+            # игра не начата, значит мы ожидаем ответ на предложение сыграть.
+            if 'да' in req['request']['nlu']['tokens']:
+                # если пользователь согласен, то проверяем не отгадал ли он уже все города.
+                # По схеме можно увидеть, что здесь окажутся и пользователи, которые уже отгадывали города
+                if len(sessionStorage[user_id]['guessed_cities']) == 3:
+                    # если все три города отгаданы, то заканчиваем игру
+                    res['response']['text'] = 'Ты отгадал все города!'
+                    res['end_session'] = True
+                else:
+                    # если есть неотгаданные города, то продолжаем игру
+                    sessionStorage[user_id]['game_started'] = True
+                    # номер попытки, чтобы показывать фото по порядку
+                    sessionStorage[user_id]['attempt'] = 1
+                    # функция, которая выбирает город для игры и показывает фото
+                    play_game(res, req)
+            elif 'нет' in req['request']['nlu']['tokens']:
+                res['response']['text'] = 'Ну и ладно!'
+                res['end_session'] = True
+            elif "Помощь" in req['request']['nlu']['tokens']:
+                res['response']['text'] = 'Скорая в пути'
+                res['end_session'] = True
+            else:
+                res['response']['text'] = 'Не поняла ответа! Так да или нет?'
+                res['response']['buttons'] = [
+                    {
+                        'title': 'Да',
+                        'hide': True
+                    },
+                    {
+                        'title': 'Нет',
+                        'hide': True
+                    },
+                    {
+                        'title': 'Помощь',
+                        'hide': True
+                    }
+                ]
+        elif req['request']["command"].lower() == "помощь" or req['requst']["original_utterance"].lower() == "помощь":
+            res['response']['text'] = 'Скорая в пути!'
         else:
-            res['response']['text'] = \
-                'Первый раз слышу об этом городе. Попробуй еще разок!'
+            play_game(res, req)
+
+
+def play_game(res, req):
+    user_id = req['session']['user_id']
+    attempt = sessionStorage[user_id]['attempt']
+    if attempt == 1:
+        # если попытка первая, то случайным образом выбираем город для гадания
+        city = random.choice(list(cities))
+        # выбираем его до тех пор пока не выбираем город, которого нет в sessionStorage[user_id]['guessed_cities']
+        while city in sessionStorage[user_id]['guessed_cities']:
+            city = random.choice(list(cities))
+        # записываем город в информацию о пользователе
+        sessionStorage[user_id]['city'] = city
+        # добавляем в ответ картинку
+        res['response']['card'] = {}
+        res['response']['card']['type'] = 'BigImage'
+        res['response']['card']['title'] = 'Что это за город?'
+        res['response']['card']['image_id'] = cities[city][attempt - 1]
+        res['response']['text'] = 'Тогда сыграем!'
+        res['response']['buttons'] = [
+            {
+                'title': 'Помощь',
+                'hide': True
+            }
+        ]
+    else:
+        # сюда попадаем, если попытка отгадать не первая
+        city = sessionStorage[user_id]['city']
+        # проверяем есть ли правильный ответ в сообщение
+        if get_city(req) == city:
+            # если да, то добавляем город к sessionStorage[user_id]['guessed_cities'] и
+            # отправляем пользователя на второй круг. Обратите внимание на этот шаг на схеме.
+            res['response']['text'] = 'Правильно! Сыграем ещё?'
+            res['response']['buttons'] = [
+                {
+                    'title': 'Да',
+                    'hide': True
+                },
+                {
+                    'title': 'Нет',
+                    'hide': True
+                },
+                {
+                    'title': 'Помощь',
+                    'hide': True
+                }
+            ]
+            sessionStorage[user_id]['guessed_cities'].append(city)
+            sessionStorage[user_id]['game_started'] = False
+            return
+        else:
+            # если нет
+            if attempt == 3:
+                # если попытка третья, то значит, что все картинки мы показали.
+                # В этом случае говорим ответ пользователю,
+                # добавляем город к sessionStorage[user_id]['guessed_cities'] и отправляем его на второй круг.
+                # Обратите внимание на этот шаг на схеме.
+                res['response']['text'] = f'Вы пытались. Это {city.title()}. Сыграем ещё?'
+                res['response']['buttons'] = [
+                    {
+                        'title': 'Да',
+                        'hide': True
+                    },
+                    {
+                        'title': 'Нет',
+                        'hide': True
+                    },
+                    {
+                        'title': 'Помощь',
+                        'hide': True
+                    }
+                ]
+                sessionStorage[user_id]['game_started'] = False
+                sessionStorage[user_id]['guessed_cities'].append(city)
+                return
+            else:
+                # иначе показываем следующую картинку
+                res['response']['card'] = {}
+                res['response']['card']['type'] = 'BigImage'
+                res['response']['card']['title'] = 'Неправильно. Вот тебе дополнительное фото'
+                res['response']['card']['image_id'] = cities[city][attempt - 1]
+                res['response']['text'] = 'А вот и не угадал!'
+                res['response']['buttons'] = [
+                    {
+                        'title': 'Помощь',
+                        'hide': True
+                    }
+                ]
+    # увеличиваем номер попытки доля следующего шага
+    sessionStorage[user_id]['attempt'] += 1
 
 
 def get_city(req):
     # перебираем именованные сущности
     for entity in req['request']['nlu']['entities']:
-        # если тип YANDEX.GEO то пытаемся получить город(city),
-        # если нет, то возвращаем None
+        # если тип YANDEX.GEO, то пытаемся получить город(city), если нет, то возвращаем None
         if entity['type'] == 'YANDEX.GEO':
             # возвращаем None, если не нашли сущности с типом YANDEX.GEO
             return entity['value'].get('city', None)
@@ -112,113 +217,9 @@ def get_first_name(req):
     for entity in req['request']['nlu']['entities']:
         # находим сущность с типом 'YANDEX.FIO'
         if entity['type'] == 'YANDEX.FIO':
-            # Если есть сущность с ключом 'first_name',
-            # то возвращаем ее значение.
+            # Если есть сущность с ключом 'first_name', то возвращаем её значение.
             # Во всех остальных случаях возвращаем None.
             return entity['value'].get('first_name', None)
-
-
-if __name__ == '__main__':
-    app.run()
-
-@app.route('/post', methods=['POST'])
-# Функция получает тело запроса и возвращает ответ.
-# Внутри функции доступен request.json - это JSON,
-# который отправила нам Алиса в запросе POST
-def main():
-    logging.info(f'Request: {request.json!r}')
-
-    # Начинаем формировать ответ, согласно документации
-    # мы собираем словарь, который потом отдадим Алисе
-    response = {
-        'session': request.json['session'],
-        'version': request.json['version'],
-        'response': {
-            'end_session': False
-        }
-    }
-
-    # Отправляем request.json и response в функцию handle_dialog.
-    # Она сформирует оставшиеся поля JSON, которые отвечают
-    # непосредственно за ведение диалога
-    handle_dialog(request.json, response)
-
-    logging.info(f'Response:  {response!r}')
-
-    # Преобразовываем в JSON и возвращаем
-    return jsonify(response)
-
-
-def handle_dialog(req, res):
-    user_id = req['session']['user_id']
-
-    if req['session']['new']:
-        # Это новый пользователь.
-        # Инициализируем сессию и поприветствуем его.
-        # Запишем подсказки, которые мы ему покажем в первый раз
-
-        sessionStorage[user_id] = {
-            'suggests': [
-                "Не хочу.",
-                "Не буду.",
-                "Отстань!",
-            ]
-        }
-        # Заполняем текст ответа
-        res['response']['text'] = 'Привет! Купи слона!'
-        # Получим подсказки
-        res['response']['buttons'] = get_suggests(user_id)
-        return
-
-    # Сюда дойдем только, если пользователь не новый,
-    # и разговор с Алисой уже был начат
-    # Обрабатываем ответ пользователя.
-    # В req['request']['original_utterance'] лежит весь текст,
-    # что нам прислал пользователь
-    # Если он написал 'ладно', 'куплю', 'покупаю', 'хорошо',
-    # то мы считаем, что пользователь согласился.
-    # Подумайте, всё ли в этом фрагменте написано "красиво"?
-    if req['request']['original_utterance'].lower() in [
-        'ладно',
-        'куплю',
-        'покупаю',
-        'хорошо'
-    ]:
-        # Пользователь согласился, прощаемся.
-        res['response']['text'] = 'Слона можно найти на Яндекс.Маркете!'
-        res['response']['end_session'] = True
-        return
-
-    # Если нет, то убеждаем его купить слона!
-    res['response']['text'] = \
-        f"Все говорят '{req['request']['original_utterance']}', а ты купи слона!"
-    res['response']['buttons'] = get_suggests(user_id)
-
-
-# Функция возвращает две подсказки для ответа.
-def get_suggests(user_id):
-    session = sessionStorage[user_id]
-
-    # Выбираем две первые подсказки из массива.
-    suggests = [
-        {'title': suggest, 'hide': True}
-        for suggest in session['suggests'][:2]
-    ]
-
-    # Убираем первую подсказку, чтобы подсказки менялись каждый раз.
-    session['suggests'] = session['suggests'][1:]
-    sessionStorage[user_id] = session
-
-    # Если осталась только одна подсказка, предлагаем подсказку
-    # со ссылкой на Яндекс.Маркет.
-    if len(suggests) < 2:
-        suggests.append({
-            "title": "Ладно",
-            "url": "https://market.yandex.ru/search?text=слон",
-            "hide": True
-        })
-
-    return suggests
 
 
 if __name__ == '__main__':
