@@ -8,7 +8,7 @@ def get_coordinates(city):
     params = {
         'geocode': city,
         'format': 'json',
-        'apikey': "40d1649f-0493-4b70-98ba-98533de7710b"
+        'apikey': "952a7df1-f366-4423-a097-f05cb4a71db2"
     }
 
     response = requests.get(url, params)
@@ -25,7 +25,7 @@ def get_country(city):
     params = {
         'geocode': city,
         'format': 'json',
-        'apikey': "40d1649f-0493-4b70-98ba-98533de7710b"
+        'apikey': "952a7df1-f366-4423-a097-f05cb4a71db2"
     }
 
     response = requests.get(url, params)
